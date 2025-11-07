@@ -135,21 +135,23 @@ class UserPortalDistributionSchema(pydantic.BaseModel):
         typing.Literal["Mujer", "Hombre"] | str, int] = pydantic.Field(
         ...,
         description="Distribución de usuarios por género.",
-        examples={
-            "Mujer": 150,
-            "Hombre": 100,
-        }
+        examples=[
+            {"Mujer": 150, "Hombre": 200},
+            {"Mujer": 300, "Hombre": 400, "No Binario": 50},
+        ]
     )
 
     ageDistribution: typing.Dict[str, int] = pydantic.Field(
         ...,
         description="Distribución de usuarios por rangos de edad (calculada con la fecha de nacimiento).",
-        examples={
-            "18-24": 100,
-            "25-34": 150,
-            "35-44": 200,
-            "45-54": 250,
-            "55-64": 300,
-            "65+": 350,
-        }
+        examples=[
+            {
+                "18-24": 100,
+                "25-34": 150,
+                "35-44": 200,
+                "45-54": 250,
+                "55-64": 300,
+                "65+": 350
+            },
+        ]
     )

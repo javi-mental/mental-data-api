@@ -1,12 +1,7 @@
 import typing
 import fastapi
-import logging
-
-from src.modules.v1.shared.utils import dates as dates_utils
 from ..schemas import user_schema
 from ..services import users_service
-
-LOGGER = logging.getLogger("uvicorn").getChild("v1.users.controllers.users")
 
 
 ROUTER = fastapi.APIRouter()
@@ -26,8 +21,8 @@ ROUTER = fastapi.APIRouter()
 )
 async def getUsersWithAURA(
     isActive: typing.Annotated[bool, fastapi.Query()] = True,
-    fromDate: typing.Annotated[typing.Optional[str], fastapi.Query(description="Formato: cadena ISO 8601 (YYYY-MM-DDTHH:MM:SSZ)")] = None,
-    toDate: typing.Annotated[typing.Optional[str], fastapi.Query(description="Formato: cadena ISO 8601 (YYYY-MM-DDTHH:MM:SSZ)")] = None,
+    fromDate: typing.Annotated[typing.Optional[int], fastapi.Query(description="Timestamp Unix (segundos, entero)")] = None,
+    toDate: typing.Annotated[typing.Optional[int], fastapi.Query(description="Timestamp Unix (segundos, entero)")] = None,
 ) -> user_schema.UserCountSchema:
     """
     Obtiene el número de usuarios con AURA habilitado según los filtros proporcionados.
@@ -43,30 +38,11 @@ async def getUsersWithAURA(
             detail="fromDate y toDate deben proporcionarse juntas o no enviarse.",
         )
     
-    # Verificamos el formato ISO de las fechas si son provistas
-    if fromDate is not None and not dates_utils.verifyISOFormat(fromDate):
+    if fromDate is not None and toDate is not None and toDate < fromDate:
         raise fastapi.HTTPException(
             status_code=400,
-            detail=f"La fecha fromDate proporcionada ({fromDate}) no tiene formato ISO.",
+            detail="toDate debe ser mayor o igual que fromDate.",
         )
-
-    if toDate is not None and not dates_utils.verifyISOFormat(toDate):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f"La fecha toDate proporcionada ({toDate}) no tiene formato ISO.",
-        )
-
-    # toDate debe ser mayor o igual a fromDate
-    # comparamos usando timestamp para ser más precisos
-    if fromDate is not None and toDate is not None:
-        fromDateTimestamp = dates_utils.convertISOtoTimestamp(fromDate)
-        toDateTimestamp = dates_utils.convertISOtoTimestamp(toDate)
-
-        if toDateTimestamp < fromDateTimestamp:
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail="toDate debe ser mayor o igual que fromDate.",
-            )
 
     count = await users_service.getUsersWithAURACount(
         isActive=isActive,
@@ -79,8 +55,8 @@ async def getUsersWithAURA(
 
 
 @ROUTER.get(
-    "/count/without-hypnosis-request",
-    summary="Obtener conteo de usuarios sin solicitud de hipnosis",
+    "/count/user-with-hypnosis-request",
+    summary="Obtener conteo de usuarios por solicitudes de hipnosis",
     response_class=fastapi.responses.JSONResponse,
     response_model=user_schema.UserCountSchema,
     responses={
@@ -89,12 +65,14 @@ async def getUsersWithAURA(
     500: {"description": "Error interno del servidor"},
     },
 )
-async def getUsersWithoutHypnosisRequest(
-    fromDate: typing.Annotated[typing.Optional[str], fastapi.Query(description="Formato: cadena ISO 8601 (YYYY-MM-DDTHH:MM:SSZ)")] = None,
-    toDate: typing.Annotated[typing.Optional[str], fastapi.Query(description="Formato: cadena ISO 8601 (YYYY-MM-DDTHH:MM:SSZ)")] = None,
+async def getUserHypnosisRequestCount(
+    isActive: typing.Annotated[bool, fastapi.Query()] = True,
+    fromDate: typing.Annotated[typing.Optional[int], fastapi.Query(description="Timestamp Unix (segundos, entero)")] = None,
+    toDate: typing.Annotated[typing.Optional[int], fastapi.Query(description="Timestamp Unix (segundos, entero)")] = None,
 ) -> user_schema.UserCountSchema:
     """
-    Obtiene el número de usuarios que no han solicitado hipnosis según los filtros proporcionados.
+    Si isActive es True cuenta usuarios con al menos una solicitud en el rango.
+    Si es False cuenta los que no generaron ninguna.
     """
 
     # Ambas fechas deben ser provistas juntas o ninguna
@@ -104,35 +82,34 @@ async def getUsersWithoutHypnosisRequest(
             detail="fromDate y toDate deben proporcionarse juntas o no enviarse.",
         )
 
-    # Verificamos el formato ISO de las fechas si son provistas
-    if fromDate is not None and not dates_utils.verifyISOFormat(fromDate):
+    if fromDate is not None and toDate is not None and toDate < fromDate:
         raise fastapi.HTTPException(
             status_code=400,
-            detail=f"La fecha fromDate proporcionada ({fromDate}) no tiene formato ISO.",
+            detail="toDate debe ser mayor o igual que fromDate.",
         )
 
-    if toDate is not None and not dates_utils.verifyISOFormat(toDate):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f"La fecha toDate proporcionada ({toDate}) no tiene formato ISO.",
-        )
-
-    if fromDate is not None and toDate is not None:
-        fromDateTimestamp = dates_utils.convertISOtoTimestamp(fromDate)
-        toDateTimestamp = dates_utils.convertISOtoTimestamp(toDate)
-
-        if toDateTimestamp < fromDateTimestamp:
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail="toDate debe ser mayor o igual que fromDate.",
-            )
-
-    count = await users_service.getUsersWithoutHypnosisRequestCount(
+    count = await users_service.getUsersByHypnosisRequestCount(
+        isActive=isActive,
         fromDate=fromDate,
         toDate=toDate,
     )
 
     return user_schema.UserCountSchema(count=count, fromDate=fromDate, toDate=toDate)
+
+
+@ROUTER.get(
+    "/portals",
+    summary="Listar portales disponibles",
+    response_class=fastapi.responses.JSONResponse,
+    response_model=user_schema.UserPortalListSchema,
+    responses={
+    200: {"description": "Respuesta exitosa", "model": user_schema.UserPortalListSchema},
+    500: {"description": "Error interno del servidor"},
+    },
+)
+async def listUserPortals() -> user_schema.UserPortalListSchema:
+    portals = await users_service.getUserPortals()
+    return user_schema.UserPortalListSchema(portals=portals)
 
 
 @ROUTER.get(
@@ -148,8 +125,8 @@ async def getUsersWithoutHypnosisRequest(
 )
 async def getUserPortalDistribution(
     portal: typing.Annotated[str, fastapi.Query(description="Portal (userLevel) para el cual se calculará la distribución")],
-    fromDate: typing.Annotated[typing.Optional[str], fastapi.Query(description="Formato: cadena ISO 8601 (YYYY-MM-DDTHH:MM:SSZ)")] = None,
-    toDate: typing.Annotated[typing.Optional[str], fastapi.Query(description="Formato: cadena ISO 8601 (YYYY-MM-DDTHH:MM:SSZ)")] = None,
+    fromDate: typing.Annotated[typing.Optional[int], fastapi.Query(description="Timestamp Unix (segundos, entero)")] = None,
+    toDate: typing.Annotated[typing.Optional[int], fastapi.Query(description="Timestamp Unix (segundos, entero)")] = None,
 ) -> user_schema.UserPortalDistributionSchema:
     """
     Obtiene la distribución de usuarios de un portal específico, agrupando por género y rangos de edad.
@@ -167,27 +144,11 @@ async def getUserPortalDistribution(
             detail="fromDate y toDate deben proporcionarse juntas o no enviarse.",
         )
 
-    if fromDate is not None and not dates_utils.verifyISOFormat(fromDate):
+    if fromDate is not None and toDate is not None and toDate < fromDate:
         raise fastapi.HTTPException(
             status_code=400,
-            detail=f"La fecha fromDate proporcionada ({fromDate}) no tiene formato ISO.",
+            detail="toDate debe ser mayor o igual que fromDate.",
         )
-
-    if toDate is not None and not dates_utils.verifyISOFormat(toDate):
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail=f"La fecha toDate proporcionada ({toDate}) no tiene formato ISO.",
-        )
-
-    if fromDate is not None and toDate is not None:
-        fromDateTimestamp = dates_utils.convertISOtoTimestamp(fromDate)
-        toDateTimestamp = dates_utils.convertISOtoTimestamp(toDate)
-
-        if toDateTimestamp < fromDateTimestamp:
-            raise fastapi.HTTPException(
-                status_code=400,
-                detail="toDate debe ser mayor o igual que fromDate.",
-            )
 
     distribution = await users_service.getUserPortalDistribution(
         portal=portal,
@@ -196,3 +157,5 @@ async def getUserPortalDistribution(
     )
 
     return distribution
+
+

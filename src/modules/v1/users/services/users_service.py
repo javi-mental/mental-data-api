@@ -5,18 +5,17 @@ import typing
 from src.modules.v1.shared.utils import dates as dates_utils
 from ..repository import USERS_REPOSITORY
 from ..schemas import user_schema
-
-
+import anyio.to_thread
 
 @aiocache.cached_stampede(
     lease=2,
-    ttl=60,
+    ttl=300,
     skip_cache_func=lambda count: count == 0,
 )
 async def _getUsersWithAURACount(
     isActive: bool,
-    fromDate: str | None,
-    toDate: str | None,
+    fromDate: int | None,
+    toDate: int | None,
 ) -> int:
 
     count = await USERS_REPOSITORY.countUsersWithAURA(
@@ -31,7 +30,7 @@ async def _getUsersWithAURACount(
 
 @aiocache.cached_stampede(
     lease=2,
-    ttl=60,
+    ttl=300,
 )
 async def _getUserByID(
     userID: str,
@@ -47,7 +46,7 @@ async def _getUserByID(
 
 @aiocache.cached_stampede(
     lease=2,
-    ttl=60,
+    ttl=300,
     skip_cache_func=lambda userIDs: len(userIDs) == 0,
 )
 async def _getUsersByListOfIDs(
@@ -65,15 +64,17 @@ async def _getUsersByListOfIDs(
 
 @aiocache.cached_stampede(
     lease=2,
-    ttl=60,
+    ttl=300,
     skip_cache_func=lambda count: count == 0,
 )
-async def _getUsersWithoutHypnosisRequestCount(
-    fromDate: str | None,
-    toDate: str | None,
+async def _getUsersByHypnosisRequestCount(
+    isActive: bool,
+    fromDate: int | None,
+    toDate: int | None,
 ) -> int:
 
-    count = await USERS_REPOSITORY.countUsersWithoutHypnosisRequest(
+    count = await USERS_REPOSITORY.countUsersByHypnosisRequest(
+        isActive=isActive,
         fromDate=fromDate,
         toDate=toDate,
     )
@@ -81,10 +82,18 @@ async def _getUsersWithoutHypnosisRequestCount(
     return count
 
 
-getUsersWithoutHypnosisRequestCount = typing.cast(
-    typing.Callable[[str | None, str | None], typing.Awaitable[int]],
-    _getUsersWithoutHypnosisRequestCount,
+getUsersByHypnosisRequestCount = typing.cast(
+    typing.Callable[[bool, int | None, int | None], typing.Awaitable[int]],
+    _getUsersByHypnosisRequestCount,
 )
+
+
+@aiocache.cached_stampede(
+    lease=2,
+    ttl=300,
+)
+async def _getUserPortals() -> list[int]:
+    return await USERS_REPOSITORY.getDistinctPortals()
 
 # Definimos los rangos de edad para la distribución
 AGE_BUCKETS: tuple[tuple[str, int, int | None], ...] = (
@@ -98,6 +107,9 @@ AGE_BUCKETS: tuple[tuple[str, int, int | None], ...] = (
 
 # Edad por debajo de la cual se considera "menor de edad"
 UNDERAGE_BUCKET = "0-17"
+
+UNKNOWN_LABEL = "S/D"
+UNKNOWN_AGE = UNKNOWN_LABEL
 
 
 def _calculateAge(birthdate: str, reference: datetime.datetime) -> int | None:
@@ -136,6 +148,8 @@ def _resolveAgeBucket(age: int) -> str:
 def _buildPortalDistribution(
     portal: str,
     users: list[user_schema.UserSchema],
+    fromDate: int | None,
+    toDate: int | None,
 ) -> user_schema.UserPortalDistributionSchema:
     totalUsers = len(users)
 
@@ -147,9 +161,12 @@ def _buildPortalDistribution(
     for user in users:
         if user.gender:
             genreCounter[user.gender] += 1
+        else:
+            genreCounter[UNKNOWN_LABEL] += 1
 
         age = _calculateAge(user.birthdate, referenceDate)
         if age is None or age < 0:
+            ageCounter[UNKNOWN_AGE] += 1
             continue
 
         bucket = _resolveAgeBucket(age)
@@ -163,6 +180,9 @@ def _buildPortalDistribution(
 
     ageDistribution : dict[str, int] = {}
 
+    if ageCounter.get(UNKNOWN_AGE):
+        ageDistribution[UNKNOWN_AGE] = ageCounter[UNKNOWN_AGE]
+
     for bucket in orderedAgeBuckets:
         if ageCounter.get(bucket):
             ageDistribution[bucket] = ageCounter[bucket]
@@ -174,18 +194,20 @@ def _buildPortalDistribution(
         totalUsers=totalUsers,
         genreDistribution=genreDistribution,
         ageDistribution=ageDistribution,
+        fromDate=fromDate,
+        toDate=toDate,
     )
 
 
 @aiocache.cached_stampede(
     lease=2,
-    ttl=60,
+    ttl=300,
     skip_cache_func=lambda distribution: distribution.totalUsers == 0,
 )
 async def _getUserPortalDistribution(
     portal: str,
-    fromDate: str | None,
-    toDate: str | None,
+    fromDate: int | None,
+    toDate: int | None,
 ) -> user_schema.UserPortalDistributionSchema:
 
     users = await USERS_REPOSITORY.getUsersByPortal(
@@ -194,12 +216,20 @@ async def _getUserPortalDistribution(
         toDate=toDate,
     )
 
-    return _buildPortalDistribution(portal=portal, users=users)
+    return await anyio.to_thread.run_sync(
+        _buildPortalDistribution,
+        portal,
+        users,
+        fromDate,
+        toDate,
+    )
+
+
 
 
 getUsersWithAURACount = typing.cast(
     typing.Callable[
-        [bool, str | None, str | None], typing.Awaitable[int]
+        [bool, int | None, int | None], typing.Awaitable[int]
     ],
     _getUsersWithAURACount,
 )
@@ -223,8 +253,14 @@ getUsersByListOfIDs = typing.cast(
 
 getUserPortalDistribution = typing.cast(
     typing.Callable[
-        [str, str | None, str | None],
+        [str, int | None, int | None],
         typing.Awaitable[user_schema.UserPortalDistributionSchema],
     ],
     _getUserPortalDistribution,
+)
+
+
+getUserPortals = typing.cast(
+    typing.Callable[[], typing.Awaitable[list[int]]],
+    _getUserPortals,
 )

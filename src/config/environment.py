@@ -2,10 +2,10 @@ import pydantic_settings
 import pydantic
 
 from .users_config import UsersConfig
-from .security_config import SecurityConfig
 from .sentry_config import SentryConfig
 from .hypnosis_config import HypnosisConfig
 from .connections_config import ConnectionsConfig
+from .auth_config import AuthConfig
 
 class EnvironmentConfig(pydantic_settings.BaseSettings):
 
@@ -25,11 +25,6 @@ class EnvironmentConfig(pydantic_settings.BaseSettings):
         description="Configuración del módulo de usuarios.",
     )
 
-    SECURITY_CONFIG: SecurityConfig = pydantic.Field(
-        default_factory=SecurityConfig,
-        description="Configuración del módulo de seguridad.",
-    )
-
     SENTRY_CONFIG: SentryConfig = pydantic.Field(
         default_factory=SentryConfig,
         description="Configuración del monitoreo de errores con Sentry.",
@@ -43,4 +38,9 @@ class EnvironmentConfig(pydantic_settings.BaseSettings):
     CONNECTIONS_CONFIG: ConnectionsConfig = pydantic.Field(
         default_factory=ConnectionsConfig,
         description="Configuración de las conexiones a bases de datos.",
+    )
+
+    AUTH_CONFIG: AuthConfig = pydantic.Field(
+        default_factory=AuthConfig,
+        description="Configuración de la integración de autenticación upstream.",
     )

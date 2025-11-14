@@ -5,13 +5,13 @@ from ..repository import USERS_REPOSITORY
 
 @aiocache.cached_stampede(
     lease=2,
-    ttl=60,
+    ttl=300,
     skip_cache_func=lambda count: count == 0,
 )
 async def _getAllSuscribersCount(
     isActive: bool,
-    fromDate: str | None,
-    toDate: str | None,
+    fromDate: int | None,
+    toDate: int | None,
 ) -> int:
 
     count = await USERS_REPOSITORY.countSuscribers(
@@ -24,7 +24,7 @@ async def _getAllSuscribersCount(
 
 getAllSuscribersCount = typing.cast(
     typing.Callable[
-        [bool, str | None, str | None], typing.Awaitable[int]
+        [bool, int | None, int | None], typing.Awaitable[int]
     ],
     _getAllSuscribersCount,
 )

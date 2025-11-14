@@ -10,7 +10,7 @@ LOGGER = logging.getLogger("uvicorn").getChild("v1.users.repository.users")
 
 
 class UsersRepository(
-    pydantic_mongo.AbstractRepository[user_schema.UserSchema]
+    pydantic_mongo.AsyncAbstractRepository[user_schema.UserSchema]
 ):
     class Meta:
         collection_name = ENVIRONMENT_CONFIG.USERS_CONFIG.USER_COLLECTION_NAME
@@ -18,22 +18,42 @@ class UsersRepository(
     async def countSuscribers(
         self,
         isActive: bool,
-        fromDate: str | None,
-        toDate: str | None,
+        fromDate: int | None,
+        toDate: int | None,
     ) -> int:
         """
-        Todos los usuarios activos son aquellos donde
-        last.Membership.membershipDate + 1 month > hoy
+        Calcula el total de suscriptores activos o inactivos usando una
+        agregación que replica la lógica del dashboard.
 
-        Al no proveer un rango de fechas, se cuentan todos los usuarios activos.
+        El calculo es:
+        - Un suscriptor es activo si:
+            - lastMembership.membershipPaymentDate existe y es menor o igual a hoy
+            - El billingDate (o calculado a partir de membershipDate + 31 días)
+              es mayor o igual a hoy
+        por lo tal:
+        membershipPaymentDate <= hoy <= billingDate
         """
 
-        queryFilters = []
-
-        membershipStatusExpr = {
-            "$let": {
-                "vars": {
-                    "membershipDate": {
+        pipeline: list[dict[str, typing.Any]] = [
+            {
+                "$addFields": {
+                    "payDate": {
+                        "$convert": {
+                            "input": "$lastMembership.membershipPaymentDate",
+                            "to": "date",
+                            "onError": None,
+                            "onNull": None,
+                        }
+                    },
+                    "rawBillingDate": {
+                        "$convert": {
+                            "input": "$lastMembership.billingDate",
+                            "to": "date",
+                            "onError": None,
+                            "onNull": None,
+                        }
+                    },
+                    "membershipDateConverted": {
                         "$convert": {
                             "input": "$lastMembership.membershipDate",
                             "to": "date",
@@ -41,105 +61,135 @@ class UsersRepository(
                             "onNull": None,
                         }
                     },
-                    "now": "$$NOW",
-                },
-                "in": {
-                    "$and": [
-                        {"$ne": ["$$membershipDate", None]},
-                        {
-                            "$gt": [
-                                {
-                                    "$dateAdd": {
-                                        "startDate": "$$membershipDate",
-                                        "unit": "month",
-                                        "amount": 1,
-                                    }
-                                },
-                                "$$now",
-                            ]
-                        },
-                    ]
-                },
-            }
-        }
-
-        if isActive:
-            # Suscriptor activo: la membresía extendida un mes sigue vigente.
-            queryFilters.append({"$expr": membershipStatusExpr})
-        else:
-            # Suscriptor inactivo: negamos la condición anterior para capturar al resto.
-            queryFilters.append({"$expr": {"$not": membershipStatusExpr}})
-
-        # Si se proveen fromDate y toDate, añadimos el filtro
-        # Donde createdAt está entre fromDate y toDate
-        if fromDate is not None and toDate is not None:
-            fromDateParsed = dates_utils.parseISODatetime(fromDate)
-            toDateParsed = dates_utils.parseISODatetime(toDate)
-
-            queryFilters.append(
-                {
-                    "createdAt": {
-                        "$gte": fromDateParsed,
-                        "$lte": toDateParsed,
+                }
+            },
+            {
+                "$addFields": {
+                    "billDate": {
+                        "$cond": {
+                            "if": {"$ne": ["$rawBillingDate", None]},
+                            "then": "$rawBillingDate",
+                            "else": {
+                                "$cond": {
+                                    "if": {"$ne": ["$membershipDateConverted", None]},
+                                    "then": {
+                                        "$dateAdd": {
+                                            "startDate": "$membershipDateConverted",
+                                            "unit": "day",
+                                            "amount": 31,
+                                        }
+                                    },
+                                    "else": None,
+                                }
+                            },
+                        }
                     }
                 }
-            )
-
-        if not queryFilters:
-            query: dict[str, object] = {}
-        elif len(queryFilters) == 1:
-            query = queryFilters[0]
-        else:
-            query = {"$and": queryFilters}
-
-        count : int = await self.get_collection().count_documents(query)
-        LOGGER.info(
-            f"Se contaron {count} suscriptores con la consulta: {query}"
-        )
-        return count
-
-    async def countUsersWithoutHypnosisRequest(
-        self,
-        fromDate: str | None,
-        toDate: str | None,
-    ) -> int:
-        """
-        Cuenta los usuarios que no han generado una solicitud de hipnosis.
-
-        Si se proporciona un rango de fechas, se filtra por createdAt dentro del rango.
-        """
-
-        pipeline: list[dict[str, typing.Any]] = []
+            },
+        ]
 
         if fromDate is not None and toDate is not None:
-            fromDateParsed = dates_utils.parseISODatetime(fromDate)
-            toDateParsed = dates_utils.parseISODatetime(toDate)
+            fromDateParsed = dates_utils.timestampToDatetime(fromDate)
+            toDateParsed = dates_utils.timestampToDatetime(toDate)
 
             pipeline.append(
                 {
                     "$match": {
-                        "createdAt": {
-                            "$gte": fromDateParsed,
-                            "$lte": toDateParsed,
+                        "$expr": {
+                            "$and": [
+                                {"$ne": ["$payDate", None]},
+                                {"$gte": ["$payDate", fromDateParsed]},
+                                {"$lte": ["$payDate", toDateParsed]},
+                            ]
                         }
                     }
                 }
+            )
+
+        activeConditions: list[dict[str, typing.Any]] = [
+            {"$ne": ["$payDate", None]},
+            {"$ne": ["$billDate", None]},
+            {"$lte": ["$payDate", "$$NOW"]},
+            {"$gte": ["$billDate", "$$NOW"]},
+        ]
+
+        if isActive:
+            statusExpr: dict[str, typing.Any] = {"$and": activeConditions}
+        else:
+            statusExpr = {"$not": [{"$and": activeConditions}]}
+
+        pipeline.append(
+            {
+                "$match": {
+                    "lastMembership.type": {"$in": ["monthly", "yearly"]},
+                    "$expr": statusExpr,
+                }
+            }
+        )
+
+        pipeline.append({"$count": "total"})
+
+        cursor = await self.get_collection().aggregate(pipeline)
+        result = await cursor.to_list(length=1)
+        count = int(result[0]["total"]) if result else 0
+
+        LOGGER.info(
+            "Se contaron %s suscriptores usando la agregación: %s",
+            count,
+            pipeline,
+        )
+
+        return count
+
+    async def countUsersByHypnosisRequest(
+        self,
+        isActive: bool,
+        fromDate: int | None,
+        toDate: int | None,
+    ) -> int:
+        """
+        Cuenta usuarios según hayan generado (activos) o no (inactivos) una
+        solicitud de hipnosis en el rango proporcionado.
+
+        Sin rango de fechas se evalúa históricamente.
+        """
+
+        lookupConditions: list[dict[str, typing.Any]] = [
+            {"$eq": ["$userId", "$$userId"]},
+        ]
+
+        if fromDate is not None and toDate is not None:
+            fromDateParsed = dates_utils.timestampToDatetime(fromDate)
+            toDateParsed = dates_utils.timestampToDatetime(toDate)
+
+            createdAtAsDate = {
+                "$convert": {
+                    "input": "$createdAt",
+                    "to": "date",
+                    "onError": None,
+                    "onNull": None,
+                }
+            }
+
+            lookupConditions.extend(
+                [
+                    {"$gte": [createdAtAsDate, fromDateParsed]},
+                    {"$lte": [createdAtAsDate, toDateParsed]},
+                ]
             )
 
         lookupPipeline: list[dict[str, typing.Any]] = [
             {
                 "$match": {
                     "$expr": {
-                        "$and": [
-                            {"$eq": ["$userId", "$$userId"]},
-                        ]
+                        "$and": lookupConditions,
                     }
                 }
             },
             {"$limit": 1},
         ]
 
-        pipeline.append(
+        pipeline: list[dict[str, typing.Any]] = [
             {
                 "$lookup": {
                     "from": ENVIRONMENT_CONFIG.HYPNOSIS_CONFIG.HYPNOSIS_COLLECTION_NAME,
@@ -148,9 +198,13 @@ class UsersRepository(
                     "as": "audioRequests",
                 }
             }
-        )
+        ]
 
-        pipeline.append({"$match": {"audioRequests": {"$eq": []}}})
+        if isActive:
+            pipeline.append({"$match": {"audioRequests": {"$ne": []}}})
+        else:
+            pipeline.append({"$match": {"audioRequests": {"$eq": []}}})
+
         pipeline.append({"$count": "count"})
 
         cursor = await self.get_collection().aggregate(pipeline)
@@ -162,8 +216,8 @@ class UsersRepository(
     async def getUsersByPortal(
         self,
         portal: str,
-        fromDate: str | None,
-        toDate: str | None,
+        fromDate: int | None,
+        toDate: int | None,
     ) -> list[user_schema.UserSchema]:
         """
         Obtiene los usuarios pertenecientes a un portal específico.
@@ -172,12 +226,12 @@ class UsersRepository(
         """
 
         queryFilters: list[dict[str, typing.Any]] = [
-            {"userLevel": portal},
+            {"userLevel": str(portal)},
         ]
 
         if fromDate is not None and toDate is not None:
-            fromDateParsed = dates_utils.parseISODatetime(fromDate)
-            toDateParsed = dates_utils.parseISODatetime(toDate)
+            fromDateParsed = dates_utils.timestampToDatetime(fromDate)
+            toDateParsed = dates_utils.timestampToDatetime(toDate)
 
             queryFilters.append(
                 {
@@ -193,20 +247,27 @@ class UsersRepository(
         else:
             query = {"$and": queryFilters}
 
-        cursor = self.get_collection().find(query)
+        cursor = await self.find_by_with_output_type(
+            query=query,
+            output_type=user_schema.UserSchema,
+        )
+
         documents: list[dict[str, typing.Any]] = []
-        async for document in cursor:
+        
+        for document in cursor:
             documents.append(document)
-        return [
-            user_schema.UserSchema.model_validate(document)
-            for document in documents
-        ]
+        
+        LOGGER.info(
+            f"Se obtuvieron {len(documents)} usuarios del portal '{portal}' con la consulta: {query}"
+        )
+
+        return documents
 
     async def countUsersWithAURA(
         self,
         isActive: bool,
-        fromDate: str | None,
-        toDate: str | None,
+        fromDate: int | None,
+        toDate: int | None,
     ) -> int:
         """
         Cuenta los usuarios que tienen AURA habilitado.
@@ -220,8 +281,8 @@ class UsersRepository(
             queryFilters.append({"auraEnabled": False})
 
         if fromDate is not None and toDate is not None:
-            fromDateParsed = dates_utils.parseISODatetime(fromDate)
-            toDateParsed = dates_utils.parseISODatetime(toDate)
+            fromDateParsed = dates_utils.timestampToDatetime(fromDate)
+            toDateParsed = dates_utils.timestampToDatetime(toDate)
 
             queryFilters.append(
                 {
@@ -245,6 +306,21 @@ class UsersRepository(
         )
         return count
 
+    async def getDistinctPortals(self) -> list[int]:
+        values = await self.get_collection().distinct("userLevel")
+        portals: list[int] = []
+
+        for value in values:
+            if value is None:
+                continue
+            try:
+                portals.append(int(value))
+            except (TypeError, ValueError):
+                LOGGER.warning("Valor userLevel no numérico ignorado: %s", value)
+
+        portals.sort()
+        LOGGER.info("Se encontraron %s portales distintos: %s", len(portals), portals)
+        return portals
 
 USERS_MONGO_CLIENT = pymongo.AsyncMongoClient(
     ENVIRONMENT_CONFIG.CONNECTIONS_CONFIG.MONGO_DATABASE_URL

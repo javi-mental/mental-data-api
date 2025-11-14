@@ -21,7 +21,7 @@ class MembershipSchema(pydantic.BaseModel):
     )
 
     membershipPaymentDate: str = pydantic.Field(
-        ...,
+        default="",
         description="Fecha de vencimiento del pago de la membresía.",
     )
 

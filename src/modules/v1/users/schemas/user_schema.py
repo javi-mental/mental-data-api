@@ -53,38 +53,23 @@ class UserSchema(pydantic.BaseModel):
         description="Información de la última membresía del usuario.",
     )
 
-    createdAt: str = pydantic.Field(
-        ...,
-        description="Fecha de creación del usuario.",
-    )
-
-    updatedAt: str = pydantic.Field(
-        ...,
-        description="Fecha de última actualización del usuario.",
-    )
-
-    isNewEra: bool = pydantic.Field(
-        ...,
-        description="Indica si el usuario pertenece a la nueva era.",
-    )
-
     userLevel: str = pydantic.Field(
         ...,
         description="Nivel del usuario (corresponde al portal).",
     )
 
     features: typing.Dict[str, typing.Any] = pydantic.Field(
-        ...,
+        default_factory=dict,
         description="Funcionalidades disponibles para el usuario.",
     )
 
     auraEnabled: bool = pydantic.Field(
-        ...,
+        default=False,
         description="Indica si el aura del usuario está habilitada.",
     )
 
     language: str = pydantic.Field(
-        ...,
+        default="es",
         description="Idioma preferido del usuario.",
     )
 
@@ -102,14 +87,14 @@ class UserCountSchema(pydantic.BaseModel):
         description="Cantidad total de usuarios.",
     )
 
-    fromDate: typing.Optional[str] = pydantic.Field(
+    fromDate: typing.Optional[int] = pydantic.Field(
         default=None,
-        description="Fecha inicial para filtrar usuarios.",
+        description="Timestamp inicial (segundos Unix) utilizado en el filtrado.",
     )
 
-    toDate: typing.Optional[str] = pydantic.Field(
+    toDate: typing.Optional[int] = pydantic.Field(
         default=None,
-        description="Fecha final para filtrar usuarios.",
+        description="Timestamp final (segundos Unix) utilizado en el filtrado.",
     )
 
 class UserPortalDistributionSchema(pydantic.BaseModel):
@@ -154,4 +139,30 @@ class UserPortalDistributionSchema(pydantic.BaseModel):
                 "65+": 350
             },
         ]
+    )
+
+    fromDate: typing.Optional[int] = pydantic.Field(
+        default=None,
+        description="Timestamp inicial (segundos Unix) utilizado en el filtrado.",
+    )
+
+
+    toDate: typing.Optional[int] = pydantic.Field(
+        default=None,
+        description="Timestamp final (segundos Unix) utilizado en el filtrado.",
+    )
+
+
+class UserPortalListSchema(pydantic.BaseModel):
+
+    model_config = pydantic.ConfigDict(
+        extra="ignore",
+        validate_by_alias=True,
+        validate_by_name=True,
+        serialize_by_alias=True,
+    )
+
+    portals: list[int] = pydantic.Field(
+        default_factory=list,
+        description="Listado ordenado de portales (userLevel) disponibles.",
     )

@@ -18,8 +18,8 @@ class HypnosisRepository(
 
     async def countAudioRequests(
         self,
-        fromDate: str | None,
-        toDate: str | None,
+        fromDate: int | None,
+        toDate: int | None,
     ) -> int:
         """
         Cuenta todas las solicitudes de audio en el rango de fechas proporcionado.
@@ -29,9 +29,9 @@ class HypnosisRepository(
 
         queryFilters = []
 
-        if fromDate and toDate:
-            fromDateParsed = dates_utils.parseISODatetime(fromDate)
-            toDateParsed = dates_utils.parseISODatetime(toDate)
+        if fromDate is not None and toDate is not None:
+            fromDateParsed = dates_utils.timestampToDatetime(fromDate)
+            toDateParsed = dates_utils.timestampToDatetime(toDate)
 
             queryFilters.append(
                 {
@@ -52,8 +52,8 @@ class HypnosisRepository(
 
     async def countNotListenedAudioRequests(
         self,
-        fromDate: str | None,
-        toDate: str | None,
+        fromDate: int | None,
+        toDate: int | None,
     ) -> int:
         """
         Cuenta las solicitudes de audio marcadas como no escuchadas (isAvailable = True).
@@ -63,9 +63,9 @@ class HypnosisRepository(
             {"isAvailable": True},
         ]
 
-        if fromDate and toDate:
-            fromDateParsed = dates_utils.parseISODatetime(fromDate)
-            toDateParsed = dates_utils.parseISODatetime(toDate)
+        if fromDate is not None and toDate is not None:
+            fromDateParsed = dates_utils.timestampToDatetime(fromDate)
+            toDateParsed = dates_utils.timestampToDatetime(toDate)
 
             queryFilters.append(
                 {

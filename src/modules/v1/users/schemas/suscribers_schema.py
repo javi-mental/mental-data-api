@@ -15,12 +15,12 @@ class SuscribersSchema(pydantic.BaseModel):
         description="Cantidad de suscriptores."
     )
 
-    fromDate: typing.Optional[str] = pydantic.Field(
+    fromDate: typing.Optional[int] = pydantic.Field(
         default=None,
-        description="Fecha desde la cual se contabilizan los suscriptores.",
+        description="Timestamp inicial (segundos Unix) utilizado en el filtrado de suscriptores.",
     )
 
-    toDate: typing.Optional[str] = pydantic.Field(
+    toDate: typing.Optional[int] = pydantic.Field(
         default=None,
-        description="Fecha hasta la cual se contabilizan los suscriptores.",
+        description="Timestamp final (segundos Unix) utilizado en el filtrado de suscriptores.",
     )

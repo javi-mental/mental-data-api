@@ -1,42 +1,22 @@
 import datetime
+import typing
 
-def verifyISOFormat(
-    dateString: str,
-) -> bool:
-    """
-    Simple funcion para verificar si una fecha está en formato ISO.
-    """
-    try:
-        datetime.datetime.fromisoformat(dateString)
-        return True
-    except ValueError:
-        return False
-    
-def convertISOtoTimestamp(
-    dateString: str,
-) -> float:
-    """
-    Convierte una fecha en formato ISO a un timestamp.
-    """
-    dt = datetime.datetime.fromisoformat(dateString)
-    return dt.timestamp()
 
-def convertTimestampToISO(
-    timestamp: float,
-) -> str:
-    """
-    Convierte un timestamp a una fecha en formato ISO.
-    """
-    dt = datetime.datetime.fromtimestamp(timestamp)
-    return dt.isoformat()
+TimestampLike = typing.Union[int, float]
 
-def convertISOtoDatetime(
-    dateString: str,
-) -> datetime.datetime:
-    """
-    Convierte una fecha en formato ISO a un objeto datetime.
-    """
-    return datetime.datetime.fromisoformat(dateString)
+
+def timestampToDatetime(timestamp: TimestampLike) -> datetime.datetime:
+    """Convierte un timestamp Unix (segundos) a datetime consciente de zona en UTC."""
+
+    return datetime.datetime.fromtimestamp(float(timestamp), datetime.timezone.utc)
+
+
+def datetimeToTimestamp(value: datetime.datetime) -> float:
+    """Convierte un datetime a timestamp Unix (segundos)."""
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=datetime.timezone.utc)
+    return value.timestamp()
 
 
 def parseISODatetime(

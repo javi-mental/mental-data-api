@@ -37,7 +37,7 @@ class HypnosisConfig(pydantic_settings.BaseSettings):
     )
 
     HYPNOSIS_WEBHOOK_SIGNATURE_SECRET: str = pydantic.Field(
-        default="",
+        ...,
         description="Secreto compartido para validar webhooks recibidos de Hypnosis.",
     )
 

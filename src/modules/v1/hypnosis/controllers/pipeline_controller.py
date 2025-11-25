@@ -6,6 +6,7 @@ from fastapi import (
     APIRouter,
     Body,
     Depends,
+    Request,
     WebSocket,
     WebSocketDisconnect,
     Query,
@@ -21,6 +22,7 @@ from src.modules.v1.hypnosis.schemas.pipeline_schema import LoggingEventsRespons
 from src.modules.v1.hypnosis.services import pipeline_events_stream_service
 
 router = APIRouter(prefix="/pipeline", tags=["Hypnosis Pipeline"])
+webhookLogger = logging.getLogger("uvicorn").getChild("v1.hypnosis.pipeline.webhook")
 
 def getPipelineService() -> PipelineService:
     return PipelineService(ENVIRONMENT_CONFIG)
@@ -85,20 +87,43 @@ async def websocketLoggingProxy(
 async def receiveLoggingEventWebhook(
     event: typing.Annotated[LoggingSchema, Body(...)],
     signature: str = Header(..., alias="x-hypnosis-signature"),
+    request: typing.Optional[Request] = None,
 ):
     expectedSignature = (
         ENVIRONMENT_CONFIG.HYPNOSIS_CONFIG.HYPNOSIS_WEBHOOK_SIGNATURE_SECRET
     )
+    clientHost = request.client.host if request and request.client else "unknown"
     if not expectedSignature:
+        webhookLogger.error(
+            "Webhook rejected: missing expected signature secret | client=%s | receivedSignature=%s",
+            clientHost,
+            signature,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Webhook signature secret is not configured.",
         )
     if not hmac.compare_digest(signature, expectedSignature):
+        webhookLogger.warning(
+            "Webhook signature mismatch | client=%s | artifact=%s | eventType=%s | audioRequestId=%s | expectedSignature=%s | receivedSignature=%s",
+            clientHost,
+            event.receivedArtifact,
+            event.eventType,
+            event.audioRequestID,
+            expectedSignature,
+            signature,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook signature.",
         )
 
+    webhookLogger.debug(
+        "Webhook accepted | client=%s | artifact=%s | eventType=%s | audioRequestId=%s",
+        clientHost,
+        event.receivedArtifact,
+        event.eventType,
+        event.audioRequestID,
+    )
     await pipeline_events_stream_service.dispatchRealtimeEvent(event)
     return {"message": "Webhook event accepted"}

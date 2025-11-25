@@ -85,10 +85,10 @@ async def websocketLoggingProxy(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def receiveLoggingEventWebhook(
+    request: Request,
     event: typing.Annotated[LoggingSchema, Body(...)],
     signature: str = Header(..., alias="x-hypnosis-signature"),
-    request: typing.Optional[Request] = None,
-):
+) -> dict[str, str]:
     expectedSignature = (
         ENVIRONMENT_CONFIG.HYPNOSIS_CONFIG.HYPNOSIS_WEBHOOK_SIGNATURE_SECRET
     )

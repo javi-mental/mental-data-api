@@ -19,6 +19,11 @@ class EnvironmentConfig(pydantic_settings.BaseSettings):
         validate_by_name=True,
         serialize_by_alias=True
     )
+    
+    CORS_ALLOWED_ORIGINS: list[str] = pydantic.Field(
+        default_factory=lambda: ["*"],
+        description="Lista de orígenes permitidos para CORS.",
+    )
 
     USERS_CONFIG: UsersConfig = pydantic.Field(
         default_factory=UsersConfig,

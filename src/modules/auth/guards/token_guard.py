@@ -28,6 +28,9 @@ PUBLIC_PATH_PREFIXES = (
 async def verifyAccessToken(request: Request) -> fastapi.Response | None:
     """Custom request check for FastAPI Guard that validates bearer tokens."""
 
+    if request.method.upper() == "OPTIONS":
+        return None
+
     if _isPublicPath(request.url.path):
         return None
 

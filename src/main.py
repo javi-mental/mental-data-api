@@ -1,5 +1,7 @@
+import os
 import fastapi
 import sentry_sdk
+from fastapi.middleware.cors import CORSMiddleware
 from guard.middleware import SecurityMiddleware
 from guard.models import SecurityConfig
 
@@ -20,6 +22,14 @@ APP = fastapi.FastAPI(
     title="MENTAL DATA API" + " - " + ENVIRONMENT_CONFIG.SENTRY_CONFIG.SENTRY_ENVIRONMENT,
     version=ENVIRONMENT_CONFIG.SENTRY_CONFIG.SENTRY_RELEASE,
     description="Aplicación FastAPI para el procesamiento de datos de Mental",
+)
+
+APP.add_middleware(
+    CORSMiddleware,
+    allow_origins=ENVIRONMENT_CONFIG.CORS_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 securityConfig = SecurityConfig(
